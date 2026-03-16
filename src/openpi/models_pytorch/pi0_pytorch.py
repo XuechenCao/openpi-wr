@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 
 import torch
 from torch import Tensor
@@ -109,7 +110,7 @@ class PI0Pytorch(nn.Module):
             self.action_time_mlp_out = nn.Linear(action_expert_config.width, action_expert_config.width)
 
         torch.set_float32_matmul_precision("high")
-        self.sample_actions = torch.compile(self.sample_actions, mode="max-autotune")
+        self.sample_actions = self._maybe_compile_sample_actions(self.sample_actions)
 
         # Initialize gradient checkpointing flag
         self.gradient_checkpointing_enabled = False
@@ -144,6 +145,18 @@ class PI0Pytorch(nn.Module):
     def is_gradient_checkpointing_enabled(self):
         """Check if gradient checkpointing is enabled."""
         return self.gradient_checkpointing_enabled
+
+    def _maybe_compile_sample_actions(self, fn):
+        """Compile sample_actions unless explicitly disabled or unavailable."""
+        if os.getenv("OPENPI_DISABLE_TORCH_COMPILE", "0") == "1":
+            logging.info("OPENPI_DISABLE_TORCH_COMPILE=1, using eager sample_actions.")
+            return fn
+
+        try:
+            return torch.compile(fn, mode="max-autotune")
+        except Exception as exc:
+            logging.warning(f"Falling back to eager sample_actions because torch.compile failed: {exc!s}")
+            return fn
 
     def _apply_checkpoint(self, func, *args, **kwargs):
         """Helper method to apply gradient checkpointing if enabled."""
